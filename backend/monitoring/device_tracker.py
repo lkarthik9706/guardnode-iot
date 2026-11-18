@@ -62,12 +62,12 @@ class DeviceTracker:
             }
             return known_hosts.get(ip, "Unknown Device")
 
-    def increment_packet_count(self, ip: str):
+    def increment_packet_count(self, ip: str, count: int = 1):
         """
         Increment packets_analyzed and immediately register live endpoints upon first observation
         so they appear on the dashboard in real time rather than waiting for window completion.
         """
-        self.packets_analyzed += 1
+        self.packets_analyzed += count
         now_str = datetime.now().strftime("%H:%M:%S")
 
         if ip not in self.devices:
@@ -83,13 +83,13 @@ class DeviceTracker:
                 "status": "OBSERVING",
                 "last_seen": now_str,
                 "first_seen": now_str,
-                "packet_count": 1,
+                "packet_count": count,
                 "completed_windows": 0,
                 "intrusion_count": 0,
                 "rate_history": deque(maxlen=MAX_RATE_HISTORY)
             }
         else:
-            self.devices[ip]["packet_count"] += 1
+            self.devices[ip]["packet_count"] += count
             self.devices[ip]["last_seen"] = now_str
 
     def update_device(self, ip: str, window_rate: float = 0.0, packets_count: int = 0, mode: str = "LIVE", stats: dict = None, prediction_info: dict = None):
