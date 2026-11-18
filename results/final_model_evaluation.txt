@@ -1,0 +1,112 @@
+GUARDNODE IoT IDS — FINAL MODEL EVALUATION REPORT
+
+==================================================
+MODEL & PREPROCESSING CONFIGURATION
+==================================================
+Dataset:
+CICIoT2023
+
+Model:
+LinearSVC (dual='auto', max_iter=15000)
+
+Class Weighting:
+Asymmetric class penalty: {0: 5.0, 1: 1.0}
+(Penalizes benign false positives 5x more heavily during hinge loss optimization, rotating the decision hyperplane away from normal IoT traffic)
+
+Preprocessing:
+np.log1p + StandardScaler (fitted strictly on training set only)
+
+Features:
+mean_packet_rate
+median_packet_rate
+max_packet_rate
+
+Feature Order:
+[
+  "mean_packet_rate",
+  "median_packet_rate",
+  "max_packet_rate"
+]
+
+Decision Threshold:
+-0.4149
+
+Threshold Selection Method:
+Validation threshold sweep (constrained to validation normal specificity >= 90.0% / FPR <= 10.0%)
+
+Threshold Objective:
+Suppression of benign false alarms while maintaining volumetric intrusion recall
+
+==================================================
+TRAINING CONFIGURATION & DATASET
+==================================================
+Training Set Size:
+51,814 samples (class-balanced)
+  - NORMAL: 25,907 windows
+  - INTRUSION: 25,907 windows (deterministic stratified sample across all 33 CICIoT2023 attack categories)
+
+Validation Set Size:
+235,369 samples (natural class distribution)
+  - NORMAL: 5,503 windows
+  - INTRUSION: 229,866 windows
+
+Test Set Size:
+235,369 samples (unseen natural test distribution)
+  - NORMAL: 5,541 windows
+  - INTRUSION: 229,828 windows
+
+==================================================
+VALIDATION PERFORMANCE (Threshold = -0.4149)
+==================================================
+TN = 4,959
+FP = 544
+FN = 65,131
+TP = 164,735
+
+Normal Specificity = 90.11%
+Intrusion Recall   = 71.67%
+FPR                = 9.89%
+FNR                = 28.33%
+F1 Score           = 0.8338
+Balanced Accuracy  = 0.8089
+Accuracy           = 0.7210
+Precision          = 0.9967
+
+==================================================
+TEST RESULTS (Threshold = -0.4149)
+==================================================
+TN = 4,999
+FP = 542
+FN = 65,464
+TP = 164,364
+
+Specificity       = 90.22%
+Intrusion Recall  = 71.52%
+FPR               = 9.78%  (False alarms reduced by 51.9% from 1,127 to 542)
+FNR               = 28.48%
+F1                = 0.8328
+Balanced Accuracy = 0.8087 (Improved by +4.64% over baseline 76.23%)
+Accuracy          = 0.7196
+Precision         = 0.9967
+
+==================================================
+CALIBRATED OPERATING THRESHOLD TIERS
+==================================================
+1. Balanced Mode (Active):
+   - Threshold: -0.4149
+   - Test Specificity: 90.22% | FPR: 9.78% | Recall: 71.52% | Balanced Acc: 80.87%
+
+2. High-Specificity Mode:
+   - Threshold: -0.3133
+   - Test Specificity: 92.04% | FPR: 7.96% | Recall: 64.24% | Balanced Acc: 78.14%
+
+3. Ultra-Low False Alarm Mode:
+   - Threshold: -0.1468
+   - Test Specificity: 94.98% | FPR: 5.02% | Recall: 49.32% | Balanced Acc: 72.15%
+
+==================================================
+DISCLAIMER & OPERATIONAL CONTEXT
+==================================================
+"These metrics represent CICIoT2023 test-set performance and should not be interpreted as guaranteed live-network performance."
+
+Live deployment environments vary based on specific IoT hardware, local background traffic baselines, and environmental network noise. GuardNode implements an initial 5-second observation window and passive rate tracking to calibrate local device endpoint behaviors.

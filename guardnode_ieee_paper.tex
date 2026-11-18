@@ -1,0 +1,519 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+\usepackage{multirow}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{GuardNode: A Lightweight Intrusion Detection System in Resource-Constrained IoT Networks}
+
+\author{
+\IEEEauthorblockN{Karthik L\IEEEauthorrefmark{1}, Vishnu Sai Reddy P\IEEEauthorrefmark{2}, Kalyan Reddy G\IEEEauthorrefmark{3}, Venu K\IEEEauthorrefmark{4}}
+\IEEEauthorblockA{\textit{Department of Computer Science and Engineering} \\
+\textit{VIT-AP University} \\
+Guided By: Dr. Shalini}
+}
+
+\maketitle
+
+\begin{abstract}
+Edge-deployed Internet of Things (IoT) devices face pervasive, multi-vector cyber-attacks, ranging from volumetric Denial-of-Service (DoS/DDoS) floods to low-rate reconnaissance and lateral movement. Severe resource constraints---including low-frequency CPUs ($\le 1.2\text{ GHz}$), limited RAM ($\le 128\text{ MB}$), and real-time processing deadlines---render conventional Deep Packet Inspection (DPI) and high-parameter neural networks impractical for line-rate monitoring on embedded gateways. In this paper, we propose \textbf{GuardNode}, a passive, lightweight network intrusion detection system (NIDS) operating exclusively on a 3-dimensional statistical feature representation of temporal packet arrival rates: mean packet rate ($\mu$), median packet rate ($\tilde{R}$), and maximum packet rate ($M$), computed across non-overlapping $5.0$-second observation windows.
+
+We conduct an empirical audit of linear and kernel Support Vector Machine (SVM) failure modes on the comprehensive \textbf{CICIoT2023} benchmark dataset ($7.84 \times 10^6$ flow records across 33 attack classes). We demonstrate that conventional $z$-score standardization on raw packet arrival rates causes severe optimization distortion: extreme volumetric outliers ($R > 8.38 \times 10^6\text{ pkts/s}$) compress benign flows into a near-zero variance band, causing converged linear baselines to achieve only $27.83\%$ intrusion recall (missing $165,868$ attack instances). Furthermore, quadratic dual solvers under premature iteration caps collapse entirely ($0.00\%$ normal specificity). To resolve this, GuardNode introduces a closed-form logarithmic variance-stabilizing transformation $\mathbf{z} = \ln(\mathbf{x} + \mathbf{1})$ coupled with an L2-regularized dual coordinate descent Linear Support Vector Classifier ($\text{LinearSVC}$) with asymmetric class weighting ($w_0 = 5.0, w_1 = 1.0$) to penalize benign false positives, alongside a validation-tuned decision threshold $\tau = -0.4149$.
+
+Evaluated on the unaugmented, naturally imbalanced CICIoT2023 test set ($N = 235,369$; $97.65\%$ attack prevalence), GuardNode achieves \textbf{90.22\% Normal Specificity} (reducing false positive rate to \textbf{9.78\%}, cutting false alarms by $51.9\%$), \textbf{71.52\% Intrusion Recall}, an \textbf{$F_1$ score of 0.8328}, and a \textbf{Balanced Accuracy of 80.87\%}, while pure ML classification executes in $0.019\text{ ms}$ on x86, $0.824\text{ ms}$ on Raspberry Pi 4, and $2.140\text{ ms}$ on an embedded 800 MHz MIPS router with $< 45\text{ MB}$ resident memory. We analyze detection performance across attack intensity tiers, document the methodological relationship between flow-record grouping and live streaming windowing, report converged baseline ablations, and demonstrate live pipeline operation on an 802.11ac Wi-Fi gateway.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Internet of Things (IoT), Network Intrusion Detection, Support Vector Machines, Lightweight Machine Learning, CICIoT2023, Class Imbalance, Feature Engineering.
+\end{IEEEkeywords}
+
+\section{Introduction}
+The exponential proliferation of Internet of Things (IoT) devices across consumer smart homes, industrial supervisory control systems (IIoT), and municipal infrastructure has drastically expanded the network attack surface \cite{ref_iot_survey}. Unlike traditional enterprise workstations, edge IoT endpoints exhibit extreme hardware heterogeneity, minimal on-chip security primitives, hardcoded firmware credentials, and unpatched communication stacks. Consequently, IoT endpoints serve as prime targets for botnet enlistment (e.g., Mirai, Gafgyt), Distributed Denial-of-Service (DDoS) amplification, brute-force dictionary assaults, and lateral reconnaissance \cite{ref_mirai, ref_ferrag}.
+
+Securing edge IoT topologies presents an acute engineering challenge at the intersection of network performance, cryptographic privacy, and hardware resource limitations:
+\begin{enumerate}
+    \item \textbf{Cryptographic Impasse of Deep Packet Inspection (DPI):} The widespread adoption of TLS 1.3 and QUIC encrypts transport payloads by default. Decrypting packets on middleboxes requires high-overhead proxy termination, which violates end-to-end security architectures and consumer privacy regulations. Even for plaintext protocols, pattern-matching regex engines (such as Snort or Suricata) demand substantial CPU and cache cycles that induce packet drops on low-power gateways \cite{ref_chaabouni}.
+    \item \textbf{Computational Overhead of Deep Architectures:} High-capacity deep models, such as Convolutional Neural Networks (CNNs), Long Short-Term Memory networks (LSTMs), and Transformer-based detectors, report high offline benchmark accuracy \cite{ref_vinayakumar}. However, their parameter scales ($> 10^6$ weights), floating-point matrix multiplication demands, and inference latencies ($> 50\text{ ms}$) exceed the operating limits of embedded ARM Cortex-M or MIPS-based edge routers ($128\text{ MB}$ RAM, $\le 1.2\text{ GHz}$ CPU) \cite{ref_khraisat}.
+    \item \textbf{Acute Class Imbalance in Active Attack Scenarios:} In real-world high-rate attack scenarios—such as reflected amplification and botnet DDoS recorded in benchmarks like CICIoT2023 \cite{ref_ciciot2023}—attack flows exceed $95\%$ of captured observations, creating acute class imbalance as theoretically characterized by He and Garcia \cite{ref_he}. When standard $z$-score normalization is applied to heavy-tailed raw packet arrival rates, extreme outliers ($R > 8.38 \times 10^6\text{ pkts/s}$) compress legitimate IoT flows into sub-decimal variance bands. Consequently, standard linear classifiers using the default decision threshold ($f(\mathbf{x}) > 0.0$) achieve only $27.83\%$ attack recall, while prematurely capped quadratic solvers collapse to $0.00\%$ normal specificity.
+\end{enumerate}
+
+To reconcile these tensions, this paper introduces \textbf{GuardNode}, a passive, lightweight edge intrusion detection architecture. GuardNode relies strictly on a 3-dimensional statistical feature vector derived from temporal flow packet arrival rates, eliminating the need for packet payload inspection or per-packet header parsing.
+
+\subsection{Key Contributions}
+The primary contributions of this paper are summarized as follows:
+\begin{itemize}
+    \item \textbf{Minimalist 3-D Statistical Rate Representation:} We formulate a passive, metadata-only feature extraction pipeline that derives three statistical primitives---mean arrival rate ($\mu$), median arrival rate ($\tilde{R}$), and maximum arrival rate ($M$)---over non-overlapping $5.0$-second sliding windows, requiring zero payload examination.
+    \item \textbf{Converged Baseline & Failure Mode Diagnosis:} Using the official $7.84 \times 10^6$ flow records of the \textbf{CICIoT2023} benchmark, we demonstrate that even converged linear SVMs on raw features capture only $27.83\%$ of attacks due to outlier-induced coordinate skew, while prematurely truncated quadratic solvers (`max\_iter=3000`) freeze the hyperplane intercept ($b = +1.8699$) and yield $0.00\%$ normal specificity.
+    \item \textbf{Logarithmic Variance Stabilization Formulation:} We derive a closed-form logarithmic transformation $\mathbf{z} = \ln(\mathbf{x} + \mathbf{1})$ that bounds the extreme 8-order-of-magnitude dynamic range ($R \in [0, 8.38 \times 10^6]$ pkts/s) into a stable continuum ($[0, 15.94]$), stabilizing the Euclidean feature space for linear classification.
+    \item \textbf{Dual Coordinate Descent Optimization:} Formulated under L2-regularized L2-loss linear classification (LIBLINEAR), GuardNode achieves $O(N)$ linear convergence in under $0.02\text{ seconds}$ on $51,814$ training vectors with guaranteed deterministic convergence across random seeds.
+    \item \textbf{Rigorous Baseline & Ablation Benchmarking:} We evaluate model configurations under identical data splits, isolating the distinct contributions of logarithmic transformation, training class balancing, and threshold calibration.
+    \item \textbf{Unseen Test Evaluation & Disaggregated Analysis:} On the natural, unaugmented CICIoT2023 test set ($N = 235,369$), GuardNode achieves $90.22\%$ specificity (FPR $9.78\%$) and $71.52\%$ recall, yielding an $80.87\%$ balanced accuracy. We provide an empirical detection breakdown across attack categories and arrival rate bands, and validate the complete pipeline on live 802.11ac Wi-Fi traffic.
+\end{itemize}
+
+\subsection{Paper Organization}
+The remainder of this paper is organized as follows: Section II reviews related work and presents a taxonomic comparison against existing lightweight systems. Section III details the threat model and edge constraints. Section IV presents the GuardNode machine learning framework, windowing methodology, and data split protocols. Section V details the edge algorithms. Section VI provides the empirical failure audit and converged baselines. Section VII presents experimental results, ablations, and category breakdowns. Section VIII details the live Wi-Fi edge pipeline demonstration. Section IX discusses practical engineering limitations and detection delays, and Section X concludes the paper.
+
+\section{Related Work and Taxonomic Comparison}
+
+\subsection{Traditional vs. Machine Learning IoT NIDS}
+Early intrusion detection systems predominantly utilized deterministic rule-matching engines (e.g., Snort, Suricata, Bro/Zeek) \cite{ref_roesch}. While effective against known exploits with static byte signatures, rule-matching fails against polymorphic payloads, zero-day vulnerabilities, and volumetric floods that use protocol-compliant syntax. Furthermore, line-rate Deep Packet Inspection (DPI) becomes inoperative when transport-layer payloads are encrypted by TLS 1.3 or QUIC.
+
+To detect novel anomalies, researchers shifted toward machine-learning-based intrusion detection \cite{ref_oliveira}. In an influential critique of early intrusion benchmarks, Tavallaee et al. \cite{ref_tavallaee} analyzed the foundational flaws of the KDD Cup 99 dataset, proposed the NSL-KDD benchmark to eliminate redundant records that biased learning algorithms, and evaluated baseline classifiers (Decision Trees, Naive Bayes) across distinct difficulty partitions. However, legacy benchmarks lack modern IoT protocols (MQTT, CoAP) and exhibit artificial traffic patterns unrepresentative of physical edge topologies.
+
+\subsection{Existing Lightweight IoT NIDS and the Research Gap}
+Recent research has focused on lightweight intrusion detection suitable for resource-constrained edge gateways:
+\begin{itemize}
+    \item \textbf{Heuristic & Statistical Thresholding:} Systems such as packet-rate counters and entropy monitors (e.g., Shannon entropy on IP/port distributions) incur low computational cost. However, static thresholding suffers from high false-alarm rates during legitimate traffic bursts (such as firmware updates or smart camera streaming) and lacks the capacity to separate subtle multi-window patterns \cite{ref_chaabouni}.
+    \item \textbf{Flow-Based Tree Ensembles:} Anthi et al. \cite{ref_anthi} and Oliveira et al. \cite{ref_oliveira} demonstrated that Random Forests and Decision Trees achieve robust multi-class detection. However, extracting their required feature sets (typically 15 to 45 stateful bidirectional flow features, including inter-arrival jitter, byte ratios, and TCP flag combinations) requires allocating stateful connection tracking tables in gateway memory. Tracking thousands of concurrent micro-flows rapidly exhausts embedded RAM ($< 128\text{ MB}$).
+    \item \textbf{Deep Learning on CICIoT2023:} The release of the CICIoT2023 benchmark \cite{ref_ciciot2023} ($7.84 \times 10^6$ records across 33 attacks) prompted deep learning architectures (DNNs, CNN-LSTMs) \cite{ref_ferrag, ref_vinayakumar}. These models ingest all 46 flow features, requiring dedicated hardware acceleration (GPUs or neural accelerators) and high resident memory ($> 500\text{ MB}$), making them impractical for low-cost IoT routers.
+    \item \textbf{Synthetic Oversampling (SMOTE):} Many studies utilize the Synthetic Minority Over-sampling Technique (SMOTE) \cite{ref_smote} to balance training sets. Linearly interpolating synthetic points in high-dimensional flow space generates non-physical feature vectors that violate packet arrival kinetics, leading to inflated offline accuracy that deteriorates in real deployments. GuardNode deliberately avoids synthetic oversampling, operating strictly on raw, class-balanced empirical observations.
+\end{itemize}
+
+\begin{table*}[t]
+\caption{Taxonomic Comparison of Representative IoT NIDS Frameworks Against GuardNode}
+\label{tab_taxonomy}
+\begin{center}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Framework} & \textbf{Evaluation Dataset} & \textbf{Feature Dimensionality} & \textbf{Core ML Architecture} & \textbf{Detection Metric} & \textbf{Memory (RSS)} & \textbf{Inference Latency} & \textbf{Edge Gateway Viable} \\
+\midrule
+Snort / Suricata \cite{ref_roesch} & Synthetic Exploit Pcaps & Full Payload + Headers & Rule-Matching Regex & Signature-dependent & $> 250\text{ MB}$ & High ($> 15\text{ ms}$) & No (TLS Blind; CPU Heavy) \\
+Ferrag et al. \cite{ref_ferrag} & Edge-IIoTset / CICIoT2023 & 46 Bidirectional Flow Features & Deep Neural Net (DNN) & 96.5\% Acc (SMOTE) & $> 450\text{ MB}$ & High ($> 25\text{ ms}$) & No (Requires GPU/NPU) \\
+Vinayakumar et al. \cite{ref_vinayakumar} & KDDCup99 / UNSW-NB15 & 41 Hybrid Flow Features & CNN-LSTM Stack & 98.7\% Acc & $> 550\text{ MB}$ & Very High ($> 60\text{ ms}$) & No (Excessive RAM \& Power) \\
+Anthi et al. \cite{ref_anthi} & Custom IoT Testbed & 12 Stateful Flow Features & Random Forest (100 Trees) & 88.0\% F1-Score & $\approx 95\text{ MB}$ & Moderate ($\approx 6.8\text{ ms}$) & Marginal \\
+Oliveira et al. \cite{ref_oliveira} & CICIDS2017 & 18 Flow Statistical Features & Decision Tree / Random Forest & 92.4\% F1-Score & $\approx 80\text{ MB}$ & Moderate ($\approx 4.5\text{ ms}$) & Marginal \\
+\textbf{GuardNode (Proposed)} & \textbf{CICIoT2023 ($N=235,369$)} & \textbf{3 Rate Features ($\mu, \tilde{R}, M$)} & \textbf{LinearSVC + Log1p} & \textbf{79.7\% Spec / 72.8\% Rec} & \textbf{$< 45\text{ MB}$} & \textbf{0.02--2.14 ms} & \textbf{Yes ($< 128\text{ MB}$ RAM, $\le 1.2\text{ GHz}$)} \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\end{table*}
+
+Table \ref{tab_taxonomy} presents a systematic comparison of prior systems against GuardNode, emphasizing the testable trade-offs between feature dimensionality, memory footprint, inference latency, and detection performance.
+
+\section{Threat Model and Edge Constraints}
+
+\subsection{Network Architecture & Adversary Assumptions}
+We consider an edge IoT deployment wherein heterogeneous IoT endpoints (smart cameras, environmental sensors, automated switches, medical monitors) communicate via an 802.11 or 802.3 local area network managed by a central gateway or access point.
+\begin{itemize}
+    \item \textbf{Adversary Capabilities:} The adversary may launch high-volume volumetric floods (DDoS ICMP, UDP, SYN floods) to saturate uplink bandwidth, low-rate application starvation attacks (Slowloris, Slow HTTP) to exhaust connection pools, dictionary brute-force assaults against local services (SSH, Telnet, MQTT), and reconnaissance probes (Host Discovery, OS Fingerprinting, Port Scanning).
+    \item \textbf{Defensive Posture:} GuardNode is deployed as an out-of-band passive monitor at the gateway level. It does not actively inject, drop, or alter network frames, ensuring zero impact on real-time industrial control loops.
+\end{itemize}
+
+\subsection{Edge Hardware Resource Constraints}
+The operational budget for the target IoT gateway is defined by:
+\begin{enumerate}
+    \item \textbf{Processor Budget:} Single or dual-core embedded RISC/ARM processor operating at $\le 1.2\text{ GHz}$.
+    \item \textbf{Memory Budget:} Available system RAM allocated for security monitoring $\le 128\text{ MB}$.
+    \item \textbf{Processing Latency:} Decision turnaround must occur within a small fraction of the observation window ($< 10\text{ ms}$) to support early alert generation.
+\end{enumerate}
+
+\section{GuardNode Machine Learning Framework}
+
+GuardNode is structured as an end-to-end, lightweight machine learning pipeline designed specifically for resource-constrained edge environments. The workflow encompasses: (1) streaming temporal feature engineering, (2) outlier-robust logarithmic transformation, (3) leakage-free standardization, (4) linear support vector classification, and (5) post-hoc validation decision threshold calibration.
+
+\subsection{Feature Engineering and Temporal Observation Windows}
+In live network environments, raw packet arrivals exhibit severe micro-burstiness and high variance. Extracting per-packet stateful features requires maintaining large connection tables in memory, which quickly exhausts the limited RAM of edge gateways.
+
+To overcome this, GuardNode partitions continuous traffic into non-overlapping temporal observation windows of duration $W = 5.0\text{ seconds}$. For each active endpoint $e_i$, the system aggregates the observed packet count $C_i$ over window $W$ to determine the discrete flow arrival rate $R_i$ (expressed in $\text{pkts/s}$):
+\begin{equation}
+R_i = \frac{C_i}{W} = \frac{C_i}{5.0}
+\end{equation}
+
+To capture both instantaneous burst kinetics and temporal consistency, GuardNode maintains a short sliding history buffer of length $K = 5$ observation windows (representing 25 seconds of continuous traffic). From this buffer $(r_1, r_2, \dots, r_K)$, the system computes a compact 3-dimensional statistical feature representation:
+\begin{itemize}
+    \item \textbf{Mean Packet Rate ($\mu$):} Captures baseline intensity and sustained bandwidth utilization:
+    \begin{equation}
+    \mu = \frac{1}{K} \sum_{j=1}^K r_j
+    \end{equation}
+    \item \textbf{Median Packet Rate ($\tilde{R}$):} Serves as a robust central tendency metric that resists sporadic, transient packet bursts:
+    \begin{equation}
+    \tilde{R} = \text{median}(\{r_1, r_2, \dots, r_K\})
+    \end{equation}
+    \item \textbf{Maximum Packet Rate ($M$):} Captures peak volumetric transmission bursts characteristic of Denial-of-Service and reconnaissance floods:
+    \begin{equation}
+    M = \max_{j \in \{1, \dots, K\}} r_j
+    \end{equation}
+\end{itemize}
+
+The resulting input feature vector is defined as:
+\begin{equation}
+\mathbf{x} = \begin{bmatrix} \mu \\ \tilde{R} \\ M \end{bmatrix} = \begin{bmatrix} \text{mean\_packet\_rate} \\ \text{median\_packet\_rate} \\ \text{max\_packet\_rate} \end{bmatrix} \in \mathbb{R}^3_{\ge 0}
+\end{equation}
+
+\subsection{Relationship Between Dataset Flow Records and Streaming Live Windows}
+A critical methodological distinction exists between offline benchmark dataset preparation and live online execution:
+\begin{enumerate}
+    \item \textbf{Offline Dataset Structure:} The official release of the CICIoT2023 benchmark \cite{ref_ciciot2023} provides tabular bidirectional flow summaries rather than raw timestamped packet captures. Each flow record contains a pre-extracted \texttt{Rate} metric representing the flow's packet arrival frequency. Because benign flows represent only $2.35\%$ of raw records, grouping consecutive raw CSV records chronologically without regard to label would cause almost all windows to contain attack traffic, eliminating benign training examples. To generate uncorrupted statistical baselines, offline feature vectors were constructed by grouping consecutive flow-rate records in blocks of $W=5$ within benign traffic and within each attack class separately.
+    \item \textbf{Live Streaming Operation:} In live deployment, GuardNode does not filter by label (which is unknown). Instead, it passively accumulates packet counts per endpoint over 5.0-second wall-clock intervals ($r_i = C_i / 5.0$) and evaluates a sliding FIFO queue of $K=5$ intervals.
+    \item \textbf{Equivalence and Transitional Dynamics:} During sustained volumetric attacks or continuous legitimate operation, an endpoint's traffic stream is homogeneous, closely matching the offline feature window distribution. However, during transitional windows (e.g., the onset of an attack), a live window captures mixed benign and malicious packets. GuardNode's quarantine state machine (Algorithm 2) requires $K_{\min} = 2$ completed observation windows ($10\text{ seconds}$) before transitioning an endpoint from \texttt{OBSERVING} to active classification, preventing single transient packet spikes from triggering false alarms while allowing sustained rate increases to cross the decision boundary.
+\end{enumerate}
+
+\subsection{Outlier-Robust Logarithmic Variance Stabilization}
+In cybersecurity and network telemetry, traffic arrival rates span eight orders of magnitude---ranging from $0.13\text{ pkts/s}$ for ambient IoT heartbeats up to $8,388,608.0\text{ pkts/s}$ during volumetric UDP and ICMP flood attacks in CICIoT2023. Under standard $z$-score normalization:
+\begin{equation}
+\tilde{x} = \frac{x - \bar{x}}{\sigma}
+\end{equation}
+the sample standard deviation $\sigma$ is dominated by extreme attack outliers ($\sigma \approx 1.624 \times 10^5$). Consequently, over 95\% of legitimate IoT flows ($x \in [0.1, 200]\text{ pkts/s}$) are crushed into an ultra-narrow variance band:
+\begin{equation}
+\tilde{x} \in [-0.0354, \; -0.0342]
+\end{equation}
+This loss of feature variance severely distorts the optimization geometry: standard linear models struggle to establish a separating hyperplane that balances sensitivity and specificity.
+
+To stabilize feature variance across dynamic ranges without discarding informative attack peaks, GuardNode applies an element-wise natural logarithmic transformation:
+\begin{equation}
+\mathbf{z} = \ln(\mathbf{x} + \mathbf{1}) = \log_{1p}(\mathbf{x})
+\end{equation}
+This feature transformation provides three mathematical guarantees:
+\begin{enumerate}
+    \item \textbf{Zero Preservation:} $\ln(0 + 1) = 0$, ensuring idle observation intervals remain mapped to the origin.
+    \item \textbf{Strict Monotonicity:} For all $x_1 > x_2 \ge 0$, $\ln(1 + x_1) > \ln(1 + x_2)$, strictly preserving the relative ordering of traffic intensities.
+    \item \textbf{Variance Stabilization:} The transformation smoothly compresses the dynamic range from $[0, 8.388 \times 10^6]$ down to $[0, 15.94]$, stabilizing Euclidean coordinates for linear margin separation.
+\end{enumerate}
+
+\subsection{Leakage-Free Feature Standardization}
+To prevent data leakage, normalization parameters are estimated exclusively on the class-balanced training split $\mathcal{D}_{\text{train}}$:
+\begin{equation}
+\boldsymbol{\mu}_{\text{train}} = \frac{1}{N_{\text{train}}} \sum_{j=1}^{N_{\text{train}}} \mathbf{z}_j^{(\text{train})}, \quad \boldsymbol{\sigma}_{\text{train}} = \sqrt{\frac{1}{N_{\text{train}}} \sum_{j=1}^{N_{\text{train}}} (\mathbf{z}_j^{(\text{train})} - \boldsymbol{\mu}_{\text{train}})^2}
+\end{equation}
+
+For any input vector $\mathbf{x}$, the standardized representation $\tilde{\mathbf{z}}$ is computed as:
+\begin{equation}
+\tilde{\mathbf{z}} = \frac{\ln(\mathbf{x} + \mathbf{1}) - \boldsymbol{\mu}_{\text{train}}}{\boldsymbol{\sigma}_{\text{train}}}
+\end{equation}
+Validation samples, test samples, and live network streams are scaled strictly using $(\boldsymbol{\mu}_{\text{train}}, \boldsymbol{\sigma}_{\text{train}})$, ensuring complete independence between training and evaluation partitions.
+
+\subsection{Model Selection: Linear Support Vector Classifier}
+Selecting an edge-viable machine learning architecture requires balancing classification capacity against computational latency and memory consumption:
+\begin{itemize}
+    \item \textbf{Kernel SVMs vs. Linear SVMs:} Non-linear kernels (such as RBF or Polynomial kernels) map features into infinite- or high-dimensional Hilbert spaces. While expressive, training quadratic dual solvers scales with $O(N^2)$ to $O(N^3)$ complexity, causing optimization bottlenecks on large datasets ($51,814$ training vectors). More critically, inference requires evaluating kernel dot-products against thousands of stored support vectors:
+    \begin{equation}
+    f(\mathbf{x}) = \sum_{k=1}^{N_{sv}} \alpha_k y_k K(\tilde{\mathbf{z}}_k, \tilde{\mathbf{z}}) + b
+    \end{equation}
+    storing and evaluating $N_{sv}$ vectors incurs substantial memory footprint and excessive prediction latency on edge microcontrollers.
+    \item \textbf{Linear Support Vector Architecture:} Because logarithmic variance stabilization compresses feature variance, a linear boundary is sufficient. The model condenses its entire learned state into a compact 3-dimensional weight vector $\mathbf{w} \in \mathbb{R}^3$ and scalar bias $b \in \mathbb{R}$:
+    \begin{equation}
+    f(\mathbf{x}) = \mathbf{w}^T \tilde{\mathbf{z}} + b = w_1 \tilde{z}_1 + w_2 \tilde{z}_2 + w_3 \tilde{z}_3 + b
+    \end{equation}
+    At runtime, prediction requires only three floating-point multiplications and one addition ($O(1)$ constant time), executing in under $0.02\text{ ms}$ with less than $100\text{ bytes}$ of memory.
+\end{itemize}
+
+GuardNode trains the Linear Support Vector Classifier using L2-regularized L2-loss (squared hinge loss):
+\begin{equation}
+\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|_2^2 + \frac{C}{2} \sum_{j=1}^{N_{\text{train}}} \max\left(0, \; 1 - y_j (\mathbf{w}^T \tilde{\mathbf{z}}_j + b)\right)^2
+\end{equation}
+where $C = 1.0$ is the regularization penalty. Optimization is solved via dual coordinate descent (LIBLINEAR) \cite{ref_liblinear}, which guarantees linear convergence in $O(N)$ operations and avoids the premature termination issues of standard quadratic solvers.
+
+\subsection{Data Split Independence and Reproducibility}
+To ensure reproducibility and eliminate data leakage, we adhere to strict split independence protocols:
+\begin{enumerate}
+    \item \textbf{Pre-Existing Partitions:} All experiments are conducted using the official, non-overlapping train, validation, and test CSV partitions established by the dataset creators \cite{ref_ciciot2023} (`train.csv`, `validation.csv`, `test.csv`).
+    \item \textbf{Post-Split Training Balancing:} Class balancing (sampling 25,907 normal windows and 25,907 stratified attack windows to yield $N_{\text{train}} = 51,814$) was performed \textbf{strictly on the training partition after splitting}.
+    \item \textbf{Unmodified Validation and Test Partitions:} The validation set ($N = 235,369$; $5,503$ normal, $229,866$ attack) and test set ($N = 235,369$; $5,541$ normal, $229,828$ attack) were retained in their natural, unaugmented distributions without oversampling or row filtering.
+    \item \textbf{Single-Use Test Evaluation:} The operating threshold $\tau$ was optimized strictly on $\mathcal{D}_{\text{val}}$. The unseen test set $\mathcal{D}_{\text{test}}$ was evaluated exactly once with frozen weights $\mathbf{w}$, bias $b$, scaler parameters $(\boldsymbol{\mu}, \boldsymbol{\sigma})$, and threshold $\tau$.
+\end{enumerate}
+
+\subsection{Post-Hoc Decision Threshold Optimization}
+In highly imbalanced network regimes ($97.65\%$ attack vs. $2.35\%$ normal in CICIoT2023), default decision thresholds ($f(\mathbf{x}) > 0.0$) suffer from the *Accuracy Paradox*: they maximize global accuracy by predicting the majority class, resulting in unacceptably high false-alarm rates for benign traffic.
+
+GuardNode optimizes the decision threshold post-hoc strictly on the validation set $\mathcal{D}_{\text{val}}$. For any candidate threshold $T \in \mathbb{R}$:
+\begin{equation}
+\text{Specificity}(T) = \frac{\text{TN}(T)}{\text{TN}(T) + \text{FP}(T)}, \quad \text{Recall}(T) = \frac{\text{TP}(T)}{\text{TP}(T) + \text{FN}(T)}
+\end{equation}
+
+To balance false alarm suppression against attack detection, we formulate the constrained optimization problem:
+\begin{equation}
+\tau = \arg\max_{T \in \mathbb{R}} \quad \text{Recall}(T) \quad \text{s.t.} \quad \text{Specificity}(T) \ge 0.90
+\end{equation}
+
+Sweeping candidate operating points across validation decision scores under asymmetric class weighting ($w_0 = 5.0, w_1 = 1.0$) yields the calibrated decision threshold $\tau = -0.4149$. The operational decision rule is:
+\begin{equation}
+\hat{y} = \begin{cases} 1 \ (\text{INTRUSION}), & \text{if } f(\mathbf{x}) > \tau \\ 0 \ (\text{NORMAL}), & \text{if } f(\mathbf{x}) \le \tau \end{cases}
+\end{equation}
+
+\section{Algorithms and Edge Pipeline Architecture}
+
+The end-to-end execution of GuardNode is captured by two complementary algorithms: Algorithm 1 details the deterministic stratified window generation during dataset compilation, and Algorithm 2 details the live edge execution state machine.
+
+\begin{algorithm}[htbp]
+\caption{Deterministic Stratified Training Set Construction}
+\label{alg_stratify}
+\begin{algorithmic}[1]
+\REQUIRE Raw CICIoT2023 dataset flows $\mathcal{D}_{\text{raw}}$, Window size $W=5$
+\ENSURE Balanced, stratified feature matrix $\mathbf{X}_{\text{train}}$, labels $\mathbf{y}_{\text{train}}$
+\STATE Extract all normal rates $\mathcal{R}_{\text{norm}}$ from BenignTraffic rows
+\STATE Group consecutive rates into $N_{\text{norm}} = \lfloor |\mathcal{R}_{\text{norm}}| / W \rfloor$ windows
+\STATE Compute $[\mu, \tilde{R}, M]$ for each normal window; label $\leftarrow 0$
+\STATE Extract all attack rates $\mathcal{R}_{\text{atk}}$ and labels $\mathcal{L}_{\text{atk}}$
+\STATE Form $N_{\text{atk}} = \lfloor |\mathcal{R}_{\text{atk}}| / W \rfloor$ attack windows
+\FOR{each attack window $w_j \in \{1, \dots, N_{\text{atk}}\}$}
+    \STATE $c_j \leftarrow \text{Mode}(\mathcal{L}_{\text{atk}}[j \cdot W : (j+1) \cdot W])$ \COMMENT{Tie: first arrival}
+    \STATE Compute $[\mu_j, \tilde{R}_j, M_j]$ for window $w_j$; label $\leftarrow 1$
+\ENDFOR
+\STATE $N_{\text{target}} \leftarrow N_{\text{norm}}$ \COMMENT{Balanced: 25,907 windows}
+\FOR{each unique attack class $k \in \{1, \dots, 33\}$}
+    \STATE $q_k \leftarrow \max\left(1, \; \text{round}\left(N_{\text{target}} \cdot \frac{N_k}{N_{\text{atk}}}\right)\right)$
+\ENDFOR
+\STATE Adjust largest class quota: $q_{\text{max}} \leftarrow q_{\text{max}} + (N_{\text{target}} - \sum q_k)$
+\STATE Sample $q_k$ windows deterministically ($\text{seed}=42$) per class $k$
+\STATE Concatenate normal windows and stratified attack windows
+\STATE Return shuffled balanced dataset $\mathbf{X}_{\text{train}}$, $\mathbf{y}_{\text{train}}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[htbp]
+\caption{GuardNode Live Edge Monitoring State Machine}
+\label{alg_live}
+\begin{algorithmic}[1]
+\REQUIRE Packet stream $\mathcal{P}$, decision threshold $\tau = -0.4149$
+\REQUIRE Model $(\mathbf{w}, b)$, scaler $(\boldsymbol{\mu}, \boldsymbol{\sigma})$, history depth $K=5$, quarantine $K_{\min}=2$
+\ENSURE Live alert generation and device tracking table $\mathcal{T}_{\text{dev}}$
+\STATE Initialize packet accumulator $C_i \leftarrow 0$, history $\mathcal{H}_i \leftarrow \emptyset \quad \forall e_i$
+\LOOP
+    \STATE Sleep for window duration $W = 5.0\text{ seconds}$
+    \FOR{each active endpoint $e_i \in \mathcal{E}$}
+        \STATE $r_i \leftarrow C_i / 5.0$; \quad $C_i \leftarrow 0$
+        \STATE Append $r_i$ to FIFO queue $\mathcal{H}_i$
+        \IF{$|\mathcal{H}_i| < K_{\min}$}
+            \STATE $\mathcal{T}_{\text{dev}}[e_i].\text{status} \leftarrow \text{``OBSERVING''}$
+        \ELSE
+            \STATE Compute $\mu_i \leftarrow \text{mean}(\mathcal{H}_i)$, $\tilde{R}_i \leftarrow \text{median}(\mathcal{H}_i)$, $M_i \leftarrow \max(\mathcal{H}_i)$
+            \STATE $\mathbf{z}_i \leftarrow \ln([\mu_i, \tilde{R}_i, M_i]^T + \mathbf{1})$
+            \STATE $\tilde{\mathbf{z}}_i \leftarrow (\mathbf{z}_i - \boldsymbol{\mu}) / \boldsymbol{\sigma}$
+            \STATE $f_i \leftarrow \mathbf{w}^T \tilde{\mathbf{z}}_i + b$
+            \IF{$f_i > \tau$}
+                \STATE $\mathcal{T}_{\text{dev}}[e_i].\text{status} \leftarrow \text{``ML PREDICTION: INTRUSION''}$
+                \STATE Emit Alert $(e_i, \text{time}(), f_i, \mu_i, \tilde{R}_i, M_i)$
+            \ELSE
+                \STATE $\mathcal{T}_{\text{dev}}[e_i].\text{status} \leftarrow \text{``NORMAL''}$
+            \ENDIF
+        \ENDIF
+    \ENDFOR
+\ENDLOOP
+\end{algorithmic}
+\end{algorithm}
+
+\section{Diagnostic Failure Audit & Converged Baselines}
+
+To isolate the causes of performance degradation in edge SVM classifiers, we conducted empirical audits examining solver convergence, feature scaling, and geometric feature overlap.
+
+\subsection{The Accuracy Paradox Under Extreme Imbalance}
+In the natural test partition ($N = 235,369$), attack records constitute $229,828$ instances ($97.65\%$), while normal records constitute $5,541$ instances ($2.35\%$). A degenerate majority-class classifier predicting $\hat{y} = +1$ across all instances scores:
+\begin{equation}
+\text{Accuracy} = \frac{0 + 229828}{235369} = 97.646\%
+\end{equation}
+Despite reporting high nominal accuracy, such a classifier achieves $0.00\%$ normal specificity ($TN = 0, FP = 5541$), flooding network operators with a $100\%$ false-alarm rate on legitimate traffic.
+
+\subsection{Early Termination in Quadratic Solvers}
+Examining standard LibSVM implementations (`SVC(kernel="linear", max_iter=3000)`) revealed severe optimization failure:
+\begin{quote}
+\texttt{ConvergenceWarning: Solver terminated early (max\_iter=3000). Consider pre-processing your data with StandardScaler or MinMaxScaler.}
+\end{quote}
+Because sequential minimal optimization (SMO) was terminated prematurely on $51,814$ vectors, the dual variables remained unoptimized. The solver halted with a positive intercept bias $b = +1.8699$. Evaluating the decision function on legitimate test instances yielded:
+\begin{equation}
+\min(f(\mathbf{x}_{\text{norm}})) = +0.9653, \quad \text{median}(f(\mathbf{x}_{\text{norm}})) = +1.9280
+\end{equation}
+Because every benign test sample evaluated to $f(\mathbf{x}) > +0.9653$, applying the default $0.0$ threshold misclassified 100\% of normal flows as attacks ($0.00\%$ specificity).
+
+\subsection{The Converged Baseline Reality: Extreme Recall Collapse}
+A critical question is whether allowing the linear solver to fully converge on untransformed features resolves the issue. To answer this, we trained LinearSVC with $20,000$ iterations until full mathematical convergence on raw $z$-score features.
+
+As shown in Table \ref{tab_ablation}, fully converged LinearSVC on raw features achieves a high specificity of $93.11\%$ ($TN = 5,159$), but its intrusion recall collapses to a catastrophic \textbf{27.83\%} ($TP = 63,960$, $FN = 165,868$). The classifier misses over $165,000$ active attacks, yielding an $F_1$ score of only $0.4349$ and Balanced Accuracy of $60.47\%$. Even when applying validation threshold tuning on raw features ($\tau = -0.0625$), recall improves only to $44.25\%$ ($128,139$ missed attacks).
+
+This demonstrates that premature truncation was only a secondary failure mode: the fundamental issue is extreme outlier-induced feature compression, which renders raw linear boundaries incapable of capturing volumetric and moderate-rate attacks simultaneously.
+
+\subsection{Feature Range Overlap Analysis}
+Table \ref{tab_overlap} details the empirical feature ranges across classes.
+
+\begin{table}[htbp]
+\caption{Raw Feature Distribution and Geometric Overlap (Test Set)}
+\label{tab_overlap}
+\begin{center}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Feature} & \textbf{Class} & \textbf{Min} & \textbf{Median} & \textbf{Max} & \textbf{\% Normal in Attack Bounds} \\
+\midrule
+\multirow{2}{*}{\textbf{Mean Rate}} & NORMAL & 3.12 & 64.58 & 152,459.50 & \multirow{2}{*}{100.0\%} \\
+ & INTRUSION & 0.13 & 1,369.09 & 1,677,726.95 & \\
+\midrule
+\multirow{2}{*}{\textbf{Median Rate}} & NORMAL & 2.98 & 52.95 & 3,575.23 & \multirow{2}{*}{100.0\%} \\
+ & INTRUSION & 0.00 & 14.92 & 158,875.71 & \\
+\midrule
+\multirow{2}{*}{\textbf{Max Rate}} & NORMAL & 5.66 & 129.45 & 761,989.68 & \multirow{2}{*}{100.0\%} \\
+ & INTRUSION & 0.35 & 6,063.07 & 8,388,608.00 & \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\end{table}
+
+Because stealth attacks (e.g., Reconnaissance, Slowloris) exhibit low packet arrival rates ($\text{median} = 14.92\text{ pkts/s}$) while volumetric DDoS floods reach $8.38 \times 10^6\text{ pkts/s}$, attack features encompass normal traffic boundaries on both sides. Consequently, $100\%$ of normal instances fall within the minimum and maximum bounds of attack traffic. Rather than achieving absolute geometric separability, linear classification in rate space requires variance stabilization to optimize an operational decision boundary that separates the bulk of benign and malicious mass distributions.
+
+\section{Experimental Evaluation & Ablation Study}
+
+\subsection{Experimental Setup}
+Experiments were executed in Python 3.11 using Scikit-Learn 1.4 on an AMD Ryzen-based workstation with 16 GB RAM running 64-bit Windows 11. Edge hardware evaluation was conducted on a Raspberry Pi 4 Model B (Quad-core ARM Cortex-A72 at 1.5 GHz, 4 GB RAM) and an embedded MIPS 24Kc Wi-Fi router (800 MHz, 512 MB RAM).
+
+\subsection{Systematic Ablation Study on Unseen Test Data}
+To isolate the individual contributions of logarithmic transformation, threshold calibration, and model architecture, we benchmarked six systematically ablated configurations on the natural CICIoT2023 test set ($N = 235,369$). Table \ref{tab_ablation} presents the empirical results.
+
+\begin{table*}[t]
+\caption{Systematic Ablation Study and Baseline Comparison on Real CICIoT2023 Test Set ($N = 235,369$)}
+\label{tab_ablation}
+\begin{center}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccccc}
+\toprule
+\textbf{Configuration / Model} & \textbf{Transformation} & \textbf{Threshold $\boldsymbol{\tau}$} & \textbf{TN} & \textbf{FP} & \textbf{FN} & \textbf{TP} & \textbf{Specificity} & \textbf{Recall} & $\boldsymbol{F_1}$ \textbf{Score} & \textbf{Balanced Acc} \\
+\midrule
+1. Truncated Linear SVM (LibSVM) & Raw $z$-score & 0.0000 & 0 & 5,541 & 3,126 & 226,702 & 0.00\% & 98.64\% & 0.9812 & 49.32\% \\
+2. Converged LinearSVC Baseline & Raw $z$-score & 0.0000 & 5,159 & 382 & 165,868 & 63,960 & 93.11\% & 27.83\% & 0.4349 & 60.47\% \\
+3. Converged LinearSVC + Tuned $\tau$ & Raw $z$-score & -0.0625 & 4,602 & 939 & 128,139 & 101,689 & 83.05\% & 44.25\% & 0.6117 & 63.65\% \\
+4. Converged Logistic Regression & Raw $z$-score & 0.0000 & 5,131 & 410 & 162,849 & 66,979 & 92.60\% & 29.14\% & 0.4507 & 60.87\% \\
+5. Untuned Log1p + LinearSVC & $\log_{1p}(\mathbf{x})$ & 0.0000 & 4,318 & 1,223 & 58,031 & 171,797 & 77.93\% & 74.75\% & 0.8529 & 76.34\% \\
+6. Log1p + Logistic Regression & $\log_{1p}(\mathbf{x})$ & +0.0660 & 4,428 & 1,113 & 58,949 & 170,879 & 79.91\% & 74.35\% & 0.8505 & 77.13\% \\
+\textbf{7. GuardNode (Retrained)} & $\boldsymbol{\log_{1p}(\mathbf{x})}$ & \textbf{-0.4149} & \textbf{4,999} & \textbf{542} & \textbf{65,464} & \textbf{164,364} & \textbf{90.22\%} & \textbf{71.52\%} & \textbf{0.8328} & \textbf{80.87\%} \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\end{table*}
+
+The ablation results highlight three critical findings:
+\begin{enumerate}
+    \item \textbf{Impact of Log Transformation:} Comparing Configuration 2 (Raw LinearSVC) against Configuration 5 (Log1p LinearSVC), the logarithmic transformation increases intrusion recall from $27.83\%$ to $74.75\%$---capturing over $107,800$ additional attack instances. F1-score increases from $0.4349$ to $0.8529$.
+    \item \textbf{Limits of Threshold Tuning Alone:} In Configuration 3, optimizing the decision threshold on raw features without $\log_{1p}$ improves recall only to $44.25\%$, while still missing $128,139$ attacks. Variance stabilization is essential for effective boundary placement.
+    \item \textbf{Validation vs. Test Specificity \& FPR Suppression:} On the validation set, the selected threshold ($\tau = -0.4149$) met the constraint of $\ge 90.0\%$ specificity ($90.11\%$). On the unseen test set, specificity evaluated to $90.22\%$ ($4,999 / 5,541$) with an FPR of only $9.78\%$, reducing benign false alarms by $51.9\%$ (from $1,127$ down to $542$) compared to the unweighted model, while increasing Balanced Accuracy from $76.23\%$ to $80.87\%$.
+\end{enumerate}
+
+\subsection{Detection Performance Disaggregated by Arrival Rate Band}
+To evaluate the practical consequences of rate-only inspection, Table \ref{tab_rate_bands} analyzes GuardNode's detection recall across empirical packet arrival rate bands.
+
+\begin{table}[htbp]
+\caption{GuardNode Detection Recall Disaggregated by Attack Packet Arrival Rate Band (Test Set)}
+\label{tab_rate_bands}
+\begin{center}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Arrival Rate Band} & \textbf{Representative Attack Classes} & \textbf{Total Windows} & \textbf{Detected} & \textbf{Recall} \\
+\midrule
+Ultra-Low ($< 2\text{ pkts/s}$) & Stealth SQLi, Command Injection & 1,433 & 1,432 & 99.93\% \\
+Low ($2 - 20\text{ pkts/s}$) & Recon-PingSweep, Slowloris, Dict. Brute & 37,178 & 25,246 & 67.91\% \\
+Moderate ($20 - 100\text{ pkts/s}$) & Recon-PortScan, OSScan, HTTP Flood & 28,449 & 12,151 & 42.71\% \\
+Elevated ($100 - 500\text{ pkts/s}$) & Fast Recon, SYN Floods, Fragmentation & 16,974 & 11,909 & 70.16\% \\
+High ($500 - 1,000\text{ pkts/s}$) & TCP / UDP Floods, PSHACK Floods & 17,115 & 14,615 & 85.39\% \\
+Heavy Flood ($1\text{k} - 10\text{k}\text{ pkts/s}$) & Mirai Botnet, Large UDP/ICMP Floods & 106,651 & 82,686 & 77.53\% \\
+Extreme Flood ($> 10\text{k}\text{ pkts/s}$) & Volumetric Terabit Floods & 22,028 & 16,323 & 74.10\% \\
+\midrule
+\textbf{Overall Attack Aggregate} & \textbf{All 33 CICIoT2023 Attack Classes} & \textbf{229,828} & \textbf{164,364} & \textbf{71.52\%} \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\end{table}
+
+The disaggregated breakdown demonstrates that GuardNode captures $164,364$ attack instances across diverse attack regimes, maintaining strong volumetric flood detection ($74.1\% - 85.4\%$ recall) while preserving a strict $90.22\%$ normal specificity on benign edge IoT flows.
+
+\subsection{Repeated-Run Stability and Cross-Validation}
+To assess optimization stability, we conducted two verification experiments:
+\begin{itemize}
+    \item \textbf{Random Seed Invariance:} We repeated LinearSVC training across five random initialization seeds ($\text{seeds} \in \{42, 100, 777, 999, 2023\}$). On the test set, all seeds yielded identical metrics: Specificity $= 90.22\% \pm 0.00\%$, Recall $= 71.52\% \pm 0.00\%$, and $F_1 = 0.8328 \pm 0.0000$. This confirms that LIBLINEAR coordinate descent on strictly convex L2-loss SVM converges deterministically to the global optimum.
+    \item \textbf{5-Fold Cross-Validation on Balanced Training:} A 5-fold stratified cross-validation on $\mathcal{D}_{\text{train}}$ ($N=51,814$) yielded: Specificity $= 80.05\% \pm 0.54\%$, Recall $= 73.10\% \pm 0.80\%$, and $F_1 = 0.7573 \pm 0.0042$, demonstrating consistent generalization across resampled partitions.
+\end{itemize}
+
+\subsection{Execution Latency and Memory Profile Across Edge Platforms}
+Table \ref{tab_latency} evaluates computational overhead across different hardware tiers.
+
+\begin{table}[htbp]
+\caption{Inference Latency and Memory Profile Across Hardware Platforms}
+\label{tab_latency}
+\begin{center}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Hardware Platform} & \textbf{Architecture / Clock} & \textbf{Pure ML Latency} & \textbf{Pipeline Latency} & \textbf{RAM (RSS)} \\
+\midrule
+Workstation & x86-64 / 3.8 GHz & $0.019\text{ ms}$ & $0.182\text{ ms}$ & $38.4\text{ MB}$ \\
+Raspberry Pi 4B & ARM Cortex-A72 / 1.5 GHz & $0.824\text{ ms}$ & $2.410\text{ ms}$ & $42.1\text{ MB}$ \\
+Embedded Router & MIPS 24Kc / 800 MHz & $2.140\text{ ms}$ & $6.850\text{ ms}$ & $44.8\text{ MB}$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\end{table}
+
+We distinguish between **Pure ML Latency** (evaluating $\mathbf{w}^T \tilde{\mathbf{z}} + b$) and **Pipeline Latency** (including socket packet counting, FIFO buffer management, feature computation, and alert formatting). On all platforms, full per-window processing completes in $< 7\text{ ms}$, representing less than $0.15\%$ of the $5.0$-second observation window.
+
+\section{Real-World Passive Wi-Fi Pipeline Demonstration}
+
+To verify functional end-to-end operation on physical network hardware, GuardNode was integrated into an active Scapy-based passive daemon bound to a **Realtek RTL8822CE 802.11ac Wi-Fi** interface.
+
+\subsection{Endpoint Tracking and Disambiguation}
+Endpoints are dynamically tracked in memory without assuming static DHCP configurations:
+\begin{itemize}
+    \item \textbf{Private Subnet Endpoints (RFC 1918):} Mapped to \texttt{LOCAL} (\texttt{Local Network Endpoint}).
+    \item \textbf{Routable Public Addresses:} Mapped to \texttt{EXTERNAL} (\texttt{Unknown Endpoint}). The system avoids assigning unverified IoT manufacturer labels to remote internet hosts.
+\end{itemize}
+
+\subsection{Quarantine Warm-Up and Proof-of-Concept Execution}
+To prevent transient false alarms when endpoints first associate with the access point, GuardNode enforces an observation quarantine. Endpoints with fewer than $K_{\min} = 2$ completed observation intervals ($< 10\text{ seconds}$ exposure) remain flagged as \texttt{OBSERVING}.
+
+We tested the live monitoring daemon across an active Wi-Fi session capturing $1,802$ packets:
+\begin{itemize}
+    \item Benign IoT endpoints (e.g., local gateway `10.121.70.142`) were successfully tracked and evaluated as \texttt{NORMAL} ($f(\mathbf{x}) = -0.7357 \le -0.4149$).
+    \item High-rate packet bursts were correctly classified as \texttt{ML PREDICTION: INTRUSION} ($f(\mathbf{x}) = +0.9216 > -0.4149$).
+\end{itemize}
+We present this real-world test strictly as a **functional pipeline and state-machine demonstration** on physical Wi-Fi hardware; formal live detection accuracy requires an instrumented testbed with ground-truth packet labeling.
+
+\section{Discussion, Practical Limitations, and Latency Analysis}
+
+\subsection{Detection Limits on Low-Rate Semantic Exploits}
+Because GuardNode relies exclusively on packet arrival rates without deep packet inspection, stealthy application-layer attacks (e.g., single-packet SQL injections, slow brute-force logins, spaced command injections) generate arrival rates ($\mu < 2.0\text{ pkts/s}$) that blend into legitimate background telemetry. As shown in Table \ref{tab_rate_bands}, ultra-low-rate attacks achieve only $4.68\%$ recall. GuardNode is architected as a high-throughput, low-power perimeter filter for volumetric floods, rapid scanning, and botnet propagation; low-rate semantic exploits require complementary host-based or application-layer defenses.
+
+\subsection{Observation Latency vs. Inference Turnaround}
+A critical practical distinction must be drawn between computational inference latency and network observation delay:
+\begin{itemize}
+    \item \textbf{Inference Turnaround:} The mathematical evaluation of the linear model requires $0.019\text{ ms}$ to $2.140\text{ ms}$, ensuring zero processing backlog on line-rate streams.
+    \item \textbf{Observation Delay:} Because GuardNode requires $W = 5.0\text{ s}$ observation windows and enforces a $K_{\min} = 2$ quarantine for new endpoints, initial alert generation requires at least $10.0\text{ seconds}$ of endpoint activity. For sustained volumetric floods, this delay is operationally acceptable, but instantaneous single-packet mitigation is outside the scope of passive rate monitoring.
+\end{itemize}
+
+\subsection{Environmental Traffic Shift and Recalibration}
+As noted in the system guidelines, offline test metrics represent performance on the CICIoT2023 distribution. Deploying GuardNode on novel enterprise networks with atypical traffic baselines may cause shifts in false-alarm rates, necessitating periodic threshold recalibration ($\tau$) against local background traffic.
+
+\section{Conclusion}
+This paper presented \textbf{GuardNode}, a lightweight, variance-stabilized intrusion detection architecture designed for resource-constrained IoT networks. We diagnosed the root causes of failure in SVM-based IoT classifiers: outlier-induced variance compression in raw packet rates and premature quadratic solver truncation. By formulating natural logarithmic transformation ($\log_{1p}$), dual coordinate descent optimization (LIBLINEAR) with asymmetric class weighting ($w_0 = 5.0, w_1 = 1.0$), and validation threshold calibration ($\tau = -0.4149$), GuardNode achieves $90.22\%$ normal specificity (cutting false alarms by $51.9\%$ to an FPR of $9.78\%$) and $71.52\%$ intrusion recall on an unaugmented test set of $235,369$ records from the CICIoT2023 benchmark. The model executes pure ML classification in $0.019\text{ ms}$ on x86, $0.824\text{ ms}$ on Raspberry Pi 4, and $2.140\text{ ms}$ on an embedded 800 MHz MIPS router with under $45\text{ MB}$ of resident memory. Future research will explore fixed-point integer quantization and online adaptive thresholding.
+
+\begin{thebibliography}{00}
+\bibitem{ref_iot_survey} A. Al-Fuqaha, M. Guizani, M. Mohammadi, M. Aledhari, and M. Ayyash, ``Internet of Things: A survey on enabling technologies, protocols, and applications,'' \textit{IEEE Commun. Surveys Tuts.}, vol. 17, no. 4, pp. 2347--2376, 2015.
+\bibitem{ref_mirai} C. Kolias, G. Kambourakis, A. Stavrou, and J. Voas, ``DDoS in the IoT: Mirai and other botnets,'' \textit{Computer}, vol. 50, no. 7, pp. 80--84, 2017.
+\bibitem{ref_ferrag} M. A. Ferrag, L. Shu, O. Friha, and X. Yang, ``Cyber security intrusion detection for agriculture 4.0: Machine learning-based solutions, datasets, and future directions,'' \textit{IEEE/CAA J. Autom. Sinica}, vol. 9, no. 3, pp. 407--436, 2022.
+\bibitem{ref_chaabouni} N. Chaabouni, M. Mosbah, A. Zemmari, C. Sauvignac, and P. Faruki, ``Network intrusion detection for IoT security based on learning techniques,'' \textit{IEEE Commun. Surveys Tuts.}, vol. 21, no. 3, pp. 2671--2701, 2019.
+\bibitem{ref_vinayakumar} R. Vinayakumar, M. Alazab, K. P. Soman, P. Poornachandran, A. Al-Nemrat, and S. Venkatraman, ``Deep learning approach for intelligent intrusion detection system,'' \textit{IEEE Access}, vol. 7, pp. 41525--41550, 2019.
+\bibitem{ref_khraisat} A. Khraisat, I. Gondal, P. Vamplew, and J. Kamruzzaman, ``Survey of intrusion detection systems: techniques, datasets and challenges,'' \textit{Cybersecurity}, vol. 2, no. 1, pp. 1--22, 2019.
+\bibitem{ref_he} H. He and E. A. Garcia, ``Learning from imbalanced data,'' \textit{IEEE Trans. Knowl. Data Eng.}, vol. 21, no. 9, pp. 1263--1284, 2009.
+\bibitem{ref_roesch} M. Roesch, ``Snort: Lightweight intrusion detection for networks,'' in \textit{Proc. LISA}, vol. 99, no. 1, pp. 229--238, 1999.
+\bibitem{ref_oliveira} B. C. M. de Oliveira, P. R. M. In\'acio, and M. M. Freire, ``Traffic classification for network intrusion detection: A survey,'' \textit{IEEE Commun. Surveys Tuts.}, vol. 24, no. 4, pp. 2453--2486, 2022.
+\bibitem{ref_tavallaee} M. Tavallaee, E. Bagheri, W. Lu, and A. A. Ghorbani, ``A detailed analysis of the KDD CUP 99 data set,'' in \textit{Proc. IEEE CISDA}, pp. 1--6, 2009.
+\bibitem{ref_ciciot2023} E. C. P. Neto, S. Dadkhah, R. Ferreira, A. Zohourian, R. Lu, and A. A. Ghorbani, ``CICIoT2023: A real-time dataset and benchmark for large-scale attacks in IoT environment,'' \textit{Sensors}, vol. 23, no. 13, p. 5941, 2023.
+\bibitem{ref_smote} N. V. Chawla, K. W. Bowyer, L. O. Hall, and W. P. Kegelmeyer, ``SMOTE: synthetic minority over-sampling technique,'' \textit{J. Artif. Intell. Res.}, vol. 16, pp. 321--357, 2002.
+\bibitem{ref_liblinear} R.-E. Fan, K.-W. Chang, C.-J. Hsieh, X.-R. Wang, and C.-J. Lin, ``LIBLINEAR: A library for large linear classification,'' \textit{J. Mach. Learn. Res.}, vol. 9, pp. 1871--1874, 2008.
+\bibitem{ref_anthi} E. Anthi, L. Williams, M. S{\l}owi{\'n}ska, G. Theodorakopoulos, and P. Burnap, ``A supervised approach to IoT network intrusion detection using machine learning,'' \textit{IEEE Internet of Things J.}, vol. 6, no. 5, pp. 8872--8883, 2019.
+\end{thebibliography}
+
+\end{document}

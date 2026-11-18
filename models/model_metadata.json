@@ -1,0 +1,66 @@
+{
+  "dataset": "CICIoT2023",
+  "synthetic_data": false,
+  "features": [
+    "mean_packet_rate",
+    "median_packet_rate",
+    "max_packet_rate"
+  ],
+  "preprocessing": "np.log1p + StandardScaler",
+  "model": "LinearSVC",
+  "class_weight": {
+    "0": 5.0,
+    "1": 1.0
+  },
+  "threshold": -0.4149,
+  "decision_threshold": -0.4149,
+  "threshold_selection_method": "Validation threshold sweep (constrained to specificity >= 90.0% / FPR <= 10.0%)",
+  "threshold_objective": "Suppression of benign false positives while maintaining volumetric intrusion recall",
+  "label_mapping": {
+    "0": "NORMAL",
+    "1": "INTRUSION"
+  },
+  "training_samples": 51814,
+  "training_normal": 25907,
+  "training_intrusion": 25907,
+  "training_metrics": {
+    "TN": 25345,
+    "FP": 562,
+    "FN": 16399,
+    "TP": 9508,
+    "specificity": 0.9783,
+    "sensitivity": 0.367,
+    "fpr": 0.0217,
+    "f1_score": 0.5286
+  },
+  "validation_metrics": {
+    "threshold": -0.4149,
+    "TN": 4959,
+    "FP": 544,
+    "FN": 65131,
+    "TP": 164735,
+    "accuracy": 0.721,
+    "precision": 0.9967,
+    "recall": 0.7167,
+    "specificity": 0.9011,
+    "fpr": 0.0989,
+    "fnr": 0.2833,
+    "f1_score": 0.8338,
+    "balanced_accuracy": 0.8089
+  },
+  "test_metrics": {
+    "threshold": -0.4149,
+    "TN": 4999,
+    "FP": 542,
+    "FN": 65464,
+    "TP": 164364,
+    "accuracy": 0.7196,
+    "precision": 0.9967,
+    "recall": 0.7152,
+    "specificity": 0.9022,
+    "fpr": 0.0978,
+    "fnr": 0.2848,
+    "f1_score": 0.8328,
+    "balanced_accuracy": 0.8087
+  }
+}

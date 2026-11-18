@@ -1,0 +1,260 @@
+{
+  "dataset": "CICIoT2023 (Official Class-Specific Flow-Rate Windows)",
+  "zip_archive": "C:\\Users\\lkart\\.gemini\\antigravity-ide\\scratch\\guardnode-iot\\data\\raw\\archive (1).zip",
+  "window_size": 5,
+  "synthetic_data_generated": false,
+  "feature_order": [
+    "mean_packet_rate",
+    "median_packet_rate",
+    "max_packet_rate"
+  ],
+  "target_mapping": {
+    "BenignTraffic": "NORMAL / 0",
+    "All attack categories": "INTRUSION / 1"
+  },
+  "splits": {
+    "train": {
+      "split_name": "train",
+      "output_file": "C:\\Users\\lkart\\.gemini\\antigravity-ide\\scratch\\guardnode-iot\\data\\processed\\train_features.csv",
+      "raw_flow_records": 5491971,
+      "valid_rate_records": 5491971,
+      "invalid_rate_records_removed": 0,
+      "normal_source_records": 129538,
+      "intrusion_source_records": 5362433,
+      "normal_windows_available": 25907,
+      "intrusion_windows_available": 1072486,
+      "total_windows_available": 1098393,
+      "selected_output_windows": 51814,
+      "output_normal_windows": 25907,
+      "output_normal_percentage": 50.0,
+      "output_intrusion_windows": 25907,
+      "output_intrusion_percentage": 50.0,
+      "discarded_for_balancing": 1046579,
+      "discarded_trailing_records": 6,
+      "raw_rate_stats": {
+        "min": 0.0,
+        "max": 8388608.0,
+        "mean": 9049.9416,
+        "median": 15.786
+      },
+      "feature_stats_after_windowing": {
+        "mean_packet_rate": {
+          "min": 0.26,
+          "max": 1468016.18,
+          "mean": 5754.9146,
+          "median": 105.96
+        },
+        "median_packet_rate": {
+          "min": 0.0,
+          "max": 77457.08,
+          "mean": 191.9135,
+          "median": 35.67
+        },
+        "max_packet_rate": {
+          "min": 0.47,
+          "max": 7340032.0,
+          "mean": 27124.9204,
+          "median": 297.31
+        }
+      },
+      "original_label_distribution": {
+        "DDoS-ICMP_Flood": 848088,
+        "DDoS-UDP_Flood": 637558,
+        "DDoS-TCP_Flood": 528499,
+        "DDoS-PSHACK_Flood": 481254,
+        "DDoS-RSTFINFlood": 475441,
+        "DDoS-SYN_Flood": 478653,
+        "DDoS-SynonymousIP_Flood": 422083,
+        "DoS-UDP_Flood": 390422,
+        "DoS-TCP_Flood": 314174,
+        "DoS-SYN_Flood": 237573,
+        "BenignTraffic": 129538,
+        "Mirai-greeth_flood": 116133,
+        "Mirai-udpplain": 104814,
+        "Mirai-greip_flood": 88821,
+        "DDoS-ICMP_Fragmentation": 53046,
+        "MITM-ArpSpoofing": 36316,
+        "DDoS-UDP_Fragmentation": 34169,
+        "DDoS-ACK_Fragmentation": 33581,
+        "DNS_Spoofing": 21214,
+        "Recon-HostDiscovery": 15737,
+        "Recon-OSScan": 11587,
+        "Recon-PortScan": 9648,
+        "DoS-HTTP_Flood": 8487,
+        "VulnerabilityScan": 4396,
+        "DDoS-HTTP_Flood": 3371,
+        "DDoS-SlowLoris": 2757,
+        "DictionaryBruteForce": 1541,
+        "SqlInjection": 590,
+        "XSS": 414,
+        "Backdoor_Malware": 392,
+        "BrowserHijacking": 665,
+        "Recon-PingSweep": 249,
+        "CommandInjection": 620,
+        "Uploading_Attack": 140
+      }
+    },
+    "validation": {
+      "split_name": "validation",
+      "output_file": "C:\\Users\\lkart\\.gemini\\antigravity-ide\\scratch\\guardnode-iot\\data\\processed\\validation_features.csv",
+      "raw_flow_records": 1176851,
+      "valid_rate_records": 1176851,
+      "invalid_rate_records_removed": 0,
+      "normal_source_records": 27519,
+      "intrusion_source_records": 1149332,
+      "normal_windows_available": 5503,
+      "intrusion_windows_available": 229866,
+      "total_windows_available": 235369,
+      "selected_output_windows": 235369,
+      "output_normal_windows": 5503,
+      "output_normal_percentage": 2.34,
+      "output_intrusion_windows": 229866,
+      "output_intrusion_percentage": 97.66,
+      "discarded_for_balancing": 0,
+      "discarded_trailing_records": 6,
+      "raw_rate_stats": {
+        "min": 0.0,
+        "max": 8388608.0,
+        "mean": 9092.8488,
+        "median": 15.7274
+      },
+      "feature_stats_after_windowing": {
+        "mean_packet_rate": {
+          "min": 0.27,
+          "max": 1677748.13,
+          "mean": 9092.8929,
+          "median": 1288.62
+        },
+        "median_packet_rate": {
+          "min": 0.0,
+          "max": 227387.52,
+          "mean": 331.3901,
+          "median": 15.5
+        },
+        "max_packet_rate": {
+          "min": 0.53,
+          "max": 8388608.0,
+          "mean": 42715.0354,
+          "median": 5737.72
+        }
+      },
+      "original_label_distribution": {
+        "DDoS-ICMP_Flood": 182011,
+        "DDoS-UDP_Flood": 136466,
+        "DDoS-TCP_Flood": 113888,
+        "DDoS-PSHACK_Flood": 102985,
+        "DDoS-SYN_Flood": 102644,
+        "DDoS-RSTFINFlood": 101563,
+        "DDoS-SynonymousIP_Flood": 90795,
+        "DoS-UDP_Flood": 83446,
+        "DoS-TCP_Flood": 67056,
+        "DoS-SYN_Flood": 51115,
+        "BenignTraffic": 27519,
+        "Mirai-greeth_flood": 24910,
+        "Mirai-udpplain": 22314,
+        "Mirai-greip_flood": 18867,
+        "DDoS-ICMP_Fragmentation": 11430,
+        "MITM-ArpSpoofing": 7741,
+        "DDoS-ACK_Fragmentation": 7194,
+        "DDoS-UDP_Fragmentation": 7221,
+        "DNS_Spoofing": 4565,
+        "Recon-HostDiscovery": 3482,
+        "Recon-OSScan": 2500,
+        "Recon-PortScan": 2083,
+        "DoS-HTTP_Flood": 1833,
+        "VulnerabilityScan": 905,
+        "DDoS-HTTP_Flood": 706,
+        "DDoS-SlowLoris": 620,
+        "DictionaryBruteForce": 290,
+        "SqlInjection": 148,
+        "BrowserHijacking": 158,
+        "CommandInjection": 132,
+        "XSS": 91,
+        "Uploading_Attack": 35,
+        "Backdoor_Malware": 93,
+        "Recon-PingSweep": 45
+      }
+    },
+    "test": {
+      "split_name": "test",
+      "output_file": "C:\\Users\\lkart\\.gemini\\antigravity-ide\\scratch\\guardnode-iot\\data\\processed\\test_features.csv",
+      "raw_flow_records": 1176851,
+      "valid_rate_records": 1176851,
+      "invalid_rate_records_removed": 0,
+      "normal_source_records": 27709,
+      "intrusion_source_records": 1149142,
+      "normal_windows_available": 5541,
+      "intrusion_windows_available": 229828,
+      "total_windows_available": 235369,
+      "selected_output_windows": 235369,
+      "output_normal_windows": 5541,
+      "output_normal_percentage": 2.35,
+      "output_intrusion_windows": 229828,
+      "output_intrusion_percentage": 97.65,
+      "discarded_for_balancing": 0,
+      "discarded_trailing_records": 6,
+      "raw_rate_stats": {
+        "min": 0.0,
+        "max": 8388608.0,
+        "mean": 9120.3106,
+        "median": 15.868
+      },
+      "feature_stats_after_windowing": {
+        "mean_packet_rate": {
+          "min": 0.13,
+          "max": 1677726.95,
+          "mean": 9120.3473,
+          "median": 1303.25
+        },
+        "median_packet_rate": {
+          "min": 0.0,
+          "max": 158875.71,
+          "mean": 332.206,
+          "median": 15.62
+        },
+        "max_packet_rate": {
+          "min": 0.35,
+          "max": 8388608.0,
+          "mean": 42806.4029,
+          "median": 5794.76
+        }
+      },
+      "original_label_distribution": {
+        "DDoS-ICMP_Flood": 180447,
+        "DDoS-UDP_Flood": 136717,
+        "DDoS-TCP_Flood": 113735,
+        "DDoS-SYN_Flood": 102208,
+        "DDoS-PSHACK_Flood": 103326,
+        "DDoS-RSTFINFlood": 101819,
+        "DDoS-SynonymousIP_Flood": 90480,
+        "DoS-UDP_Flood": 83627,
+        "DoS-TCP_Flood": 67697,
+        "DoS-SYN_Flood": 51116,
+        "BenignTraffic": 27709,
+        "Mirai-greeth_flood": 24934,
+        "Mirai-udpplain": 22536,
+        "Mirai-greip_flood": 19279,
+        "DDoS-ICMP_Fragmentation": 11402,
+        "MITM-ArpSpoofing": 7840,
+        "DDoS-ACK_Fragmentation": 7292,
+        "DDoS-UDP_Fragmentation": 7224,
+        "DNS_Spoofing": 4570,
+        "Recon-HostDiscovery": 3331,
+        "Recon-OSScan": 2433,
+        "Recon-PortScan": 2082,
+        "DoS-HTTP_Flood": 1805,
+        "VulnerabilityScan": 913,
+        "DDoS-HTTP_Flood": 709,
+        "DDoS-SlowLoris": 622,
+        "DictionaryBruteForce": 319,
+        "CommandInjection": 119,
+        "SqlInjection": 148,
+        "Backdoor_Malware": 89,
+        "XSS": 103,
+        "BrowserHijacking": 134,
+        "Recon-PingSweep": 53,
+        "Uploading_Attack": 33
+      }
+    }
+  }
+}

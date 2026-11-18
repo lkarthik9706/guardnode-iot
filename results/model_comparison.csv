@@ -1,0 +1,4 @@
+Kernel,Accuracy,Precision,Recall_TPR,F1_Score,FPR,FNR,Training_Time_Sec,Prediction_Time_Sec,TN,FP,FN,TP
+Linear,1.0,1.0,1.0,1.0,0.0,0.0,0.0054,0.0004,500,0,0,500
+Poly,1.0,1.0,1.0,1.0,0.0,0.0,0.0099,0.0005,500,0,0,500
+Rbf,1.0,1.0,1.0,1.0,0.0,0.0,0.0157,0.0008,500,0,0,500

@@ -1,0 +1,26 @@
+# Python Virtual Environments & Cache
+.venv/
+env/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+
+# Large raw dataset archives (exceeds GitHub 100MB limit)
+data/raw/*.zip
+*.zip
+
+# Node.js
+frontend/node_modules/
+frontend/.vite/
+npm-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

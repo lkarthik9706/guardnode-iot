@@ -1,0 +1,4 @@
+Model,Threshold,TN,FP,FN,TP,Accuracy,Precision,NORMAL_Recall_Specificity,INTRUSION_Recall_Sensitivity,FPR,FNR,F1_Score,Balanced_Accuracy
+Old Linear SVM (SVC),0.0,0,5541,3126,226702,0.9632,0.9761,0.0,0.9864,1.0,0.0136,0.9812,0.4932
+Old Polynomial SVM (SVC),0.0,0,5541,2000,227828,0.968,0.9763,0.0,0.9913,1.0,0.0087,0.9837,0.4957
+New LinearSVC (log1p + Tuned Threshold),0.2556,4990,551,91401,138427,0.6093,0.996,0.9006,0.6023,0.0994,0.3977,0.7507,0.7514
